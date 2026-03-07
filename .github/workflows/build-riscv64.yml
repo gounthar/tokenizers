@@ -16,12 +16,26 @@ jobs:
     timeout-minutes: 120
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_HOME: /home/poddingue/.cache/cargo
+      CARGO_TARGET_DIR: /home/poddingue/.cache/cargo-target/${{ github.repository }}
+      RUSTUP_HOME: /home/poddingue/.cache/rustup
+      SCCACHE_DIR: /home/poddingue/.cache/sccache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
+
+      - name: Prepare build cache
+        run: |
+          mkdir -p $CARGO_HOME $CARGO_TARGET_DIR $SCCACHE_DIR
+          # Install sccache if not present
+          if ! command -v sccache &>/dev/null && [ -f "$CARGO_HOME/bin/sccache" ]; then
+            export PATH="$CARGO_HOME/bin:$PATH"
+          fi
+          echo "Cargo cache: $(du -sh $CARGO_HOME 2>/dev/null | cut -f1 || echo 'empty')"
+          echo "Target cache: $(du -sh $CARGO_TARGET_DIR 2>/dev/null | cut -f1 || echo 'empty')"
 
       - name: Set up Python
         run: |
@@ -52,6 +66,15 @@ jobs:
           name: wheel-riscv64
           path: /tmp/wheels/*.whl
           retention-days: 90
+
+      - name: Trim build cache
+        if: always()
+        run: |
+          # Remove build artifacts but keep registry/git caches
+          find $CARGO_TARGET_DIR -name "*.d" -delete 2>/dev/null || true
+          find $CARGO_TARGET_DIR -name "*.fingerprint" -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Cargo cache after trim: $(du -sh $CARGO_HOME 2>/dev/null | cut -f1 || echo 'empty')"
+          echo "Target cache after trim: $(du -sh $CARGO_TARGET_DIR 2>/dev/null | cut -f1 || echo 'empty')"
 
       - name: Cleanup
         if: always()
